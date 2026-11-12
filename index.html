@@ -408,10 +408,21 @@
   </script>
   <script>
     const SUPPORTED_EXTS = new Set(['mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'wma', 'alac', 'aiff', 'aif', 'webm', 'mp4', '3gp', 'amr']);
+    const BLOCKED_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'txt', 'doc', 'docx', 'zip', 'apk', 'html', 'json', 'js', 'css']);
+
     function isAudioMediaFile(file) {
-      if (file.type && (file.type.startsWith('audio/') || file.type === 'video/webm' || file.type === 'video/mp4')) return true;
-      return SUPPORTED_EXTS.has(file.name.split('.').pop().toLowerCase());
+      if (!file || file.size === 0) return false;
+      if (file.type) {
+        if (file.type.startsWith('audio/') || file.type === 'video/webm' || file.type === 'video/mp4') return true;
+        if (file.type.startsWith('image/') || file.type.startsWith('text/')) return false;
+      }
+      const parts = file.name.split('.');
+      if (parts.length === 1) return true; // Android ContentResolver sometimes omits file extension
+      const ext = parts.pop().toLowerCase();
+      if (BLOCKED_EXTS.has(ext)) return false;
+      return SUPPORTED_EXTS.has(ext);
     }
+
     function getFileExtension(filename) {
       const parts = filename.split('.');
       return parts.length > 1 ? parts.pop().toUpperCase() : 'AUDIO';
@@ -608,6 +619,18 @@
       folderFallbackInput.value = '';
       addMediaItemsToPlaylist(items, true);
     });
+    
+    fileInput.addEventListener('change', (e) => {
+      const rawFiles = Array.from(e.target.files || []);
+      if (!rawFiles.length) {
+        trackStatus.textContent = 'No files received from picker';
+        return;
+      }
+      trackStatus.textContent = `Loading ${rawFiles.length} file(s)...`;
+      const items = rawFiles.filter(isAudioMediaFile).map(file => ({ file, folder: 'Music Library' }));
+      fileInput.value = '';
+      addMediaItemsToPlaylist(items, false);
+    });
   </script>
   <script>
     let audioCtx = null, sourceNode = null, filters = [];
@@ -772,21 +795,56 @@
     }
 
     function renderPlaylist() {
-      const s = getActiveSession(); playlistContainer.innerHTML = '';
-      if (!s.tracks.length) { trackCountEl.textContent = '0'; playlistContainer.innerHTML = `<div class="playlist-empty">"${s.name}" is empty</div>`; return; }
-      const filtered = s.tracks.map((track, originalIndex) => ({ track, originalIndex })).filter(({ track }) => !s.searchQuery || track.name.toLowerCase().includes(s.searchQuery) || track.ext.toLowerCase().includes(s.searchQuery));
+      const s = getActiveSession();
+      playlistContainer.innerHTML = '';
+      if (!s.tracks.length) {
+        trackCountEl.textContent = '0';
+        playlistContainer.innerHTML = `<div class="playlist-empty">"${s.name}" is empty</div>`;
+        return;
+      }
+      const filtered = s.tracks
+        .map((track, originalIndex) => ({ track, originalIndex }))
+        .filter(({ track }) => !s.searchQuery || track.name.toLowerCase().includes(s.searchQuery) || track.ext.toLowerCase().includes(s.searchQuery));
+
       trackCountEl.textContent = filtered.length === s.tracks.length ? `${s.tracks.length}` : `${filtered.length} of ${s.tracks.length}`;
-      if (!filtered.length) { playlistContainer.innerHTML = '<div class="playlist-empty">No matching songs found</div>'; return; }
-      filtered.forEach(({ track, originalIndex }) => {
+      if (!filtered.length) {
+        playlistContainer.innerHTML = '<div class="playlist-empty">No matching songs found</div>';
+        return;
+      }
+
+      const visibleSlice = filtered.slice(0, 150);
+      const frag = document.createDocumentFragment();
+      visibleSlice.forEach(({ track, originalIndex }) => {
         const isCurrent = originalIndex === s.currentIndex;
         const item = document.createElement('div');
         item.className = `playlist-item ${isCurrent ? 'active' : ''}`;
         item.innerHTML = `<div class="playlist-item-info"><span style="display:flex;">${isCurrent ? SVG_EQ : SVG_NOTE}</span><div class="playlist-item-text"><span class="playlist-item-title">${track.name}</span><span class="playlist-item-sub">${track.ext}</span></div></div><button class="remove-track-btn">${SVG_CLOSE}</button>`;
         item.querySelector('.playlist-item-info').addEventListener('click', () => loadTrack(originalIndex, true, 0));
         item.querySelector('.remove-track-btn').addEventListener('click', (e) => { e.stopPropagation(); removeTrack(originalIndex); });
-        playlistContainer.appendChild(item);
+        frag.appendChild(item);
       });
+
+      if (filtered.length > 150) {
+        const note = document.createElement('div');
+        note.className = 'playlist-empty';
+        note.textContent = `Showing first 150 of ${filtered.length} songs — use Search above to jump to any track`;
+        frag.appendChild(note);
+      }
+      playlistContainer.appendChild(frag);
     }
+
+    function clearQueue() {
+      const s = getActiveSession();
+      if (activeBlobUrl) { URL.revokeObjectURL(activeBlobUrl); activeBlobUrl = null; }
+      s.tracks = []; s.currentIndex = -1; s.currentTime = 0; s.searchQuery = '';
+      searchInput.value = ''; clearSearchBtn.style.display = 'none';
+      audio.pause(); audio.removeAttribute('src'); audio.load();
+      coverImg.style.display = 'none'; defaultArtIcon.style.display = 'flex'; formatBadge.style.display = 'none';
+      trackTitle.textContent = 'No tracks loaded'; trackArtist.textContent = ''; trackStatus.textContent = `Add tracks to "${s.name}"`;
+      playIcon.innerHTML = SVG_PLAY; seekSlider.value = 0; seekSlider.disabled = true; currentTimeEl.textContent = '0:00'; durationEl.textContent = '0:00';
+      albumHue = 256; albumSat = 34; applyCurrentTheme(); updateAmbientBackdrop(null, false); renderPlaylistTabs(); renderPlaylist(); persistSessionsToDB();
+    }
+
 
     let activeBlobUrl = null;
 
