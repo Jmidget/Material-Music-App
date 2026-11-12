@@ -483,11 +483,23 @@
           tx.oncomplete = () => {
             if (Array.isArray(reqS.result) && reqS.result.length) {
               sessions = reqS.result.map(s => ({
-                id: s.id, name: s.name, currentIndex: s.currentIndex ?? -1, currentTime: s.currentTime ?? 0,
-                isShuffle: Boolean(s.isShuffle), repeatMode: s.repeatMode || 'off', playbackRate: s.playbackRate ?? 1.0,
-                searchQuery: '', selectedFolder: 'ALL',
-                tracks: (s.tracks || []).filter(t => t.file).map(t => ({ file: t.file, name: t.name, ext: t.ext, folder: t.folder, url: URL.createObjectURL(t.file) }))
+                id: s.id,
+                name: s.name,
+                isLibrary: Boolean(s.isLibrary || s.id === 'pl-all'),
+                currentIndex: s.currentIndex ?? -1,
+                currentTime: s.currentTime ?? 0,
+                isShuffle: Boolean(s.isShuffle),
+                repeatMode: s.repeatMode || 'off',
+                playbackRate: s.playbackRate ?? 1.0,
+                searchQuery: '',
+                selectedFolder: 'ALL',
+                tracks: (s.tracks || []).filter(t => t.file).map(t => ({
+                  file: t.file, name: t.name, ext: t.ext, folder: t.folder
+                }))
               }));
+              if (!sessions.some(s => s.isLibrary)) {
+                sessions.unshift(createSession('pl-all', 'All Songs', true));
+              }
               activeSessionId = (reqA.result && sessions.some(s => s.id === reqA.result)) ? reqA.result : sessions.at(0).id;
             }
             resolve(true);
@@ -596,14 +608,24 @@
         targetSession.currentTime = 0;
       }
 
+      const existingKeys = new Set(targetSession.tracks.map(t => `${t.file.name}_${t.file.size}`));
+      const allSongsKeys = new Set(allSongsSession.tracks.map(t => `${t.file.name}_${t.file.size}`));
+      const uniqueItems = items.filter(({ file }) => !existingKeys.has(`${file.name}_${file.size}`));
+
+      if (!uniqueItems.length) {
+        trackStatus.textContent = 'All selected songs are already in this playlist';
+        return;
+      }
+
       const wasEmpty = targetSession.tracks.length === 0;
       const CHUNK_SIZE = 150;
       let offset = 0;
 
       function processNextChunk() {
-        const slice = items.slice(offset, offset + CHUNK_SIZE);
+        const slice = uniqueItems.slice(offset, offset + CHUNK_SIZE);
         for (let i = 0; i < slice.length; i++) {
           const { file, folder } = slice.at(i);
+          const key = `${file.name}_${file.size}`;
           const entry = {
             file,
             name: file.name.replace(/\.[^/.]+$/, ""),
@@ -611,8 +633,9 @@
             folder: folder || 'Music Library'
           };
           targetSession.tracks.push(entry);
-          if (targetSession.id !== allSongsSession.id) {
+          if (targetSession.id !== allSongsSession.id && !allSongsKeys.has(key)) {
             allSongsSession.tracks.push(entry);
+            allSongsKeys.add(key);
           }
         }
 
@@ -622,12 +645,12 @@
         if (offset === slice.length && wasEmpty) {
           loadTrack(0, true, 0);
         } else {
-          trackStatus.textContent = offset < items.length
-            ? `Loading ${offset} of ${items.length} songs...`
+          trackStatus.textContent = offset < uniqueItems.length
+            ? `Loading ${offset} of ${uniqueItems.length} songs...`
             : `${audio.paused ? 'Paused' : 'Playing'} (${targetSession.currentIndex + 1} of ${targetSession.tracks.length})`;
         }
 
-        if (offset < items.length) {
+        if (offset < uniqueItems.length) {
           setTimeout(processNextChunk, 25);
         } else {
           targetSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
