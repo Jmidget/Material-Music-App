@@ -408,6 +408,9 @@
         } catch (e) {
           if (e.name !== 'AbortError') folderFallbackInput.click();
         }
+      } else if (isAndroid) {
+        // Android Chrome does not support webkitdirectory; open multi-file picker so user can "Select All" inside any SD card folder
+        fileInput.click();
       } else {
         folderFallbackInput.click();
       }
