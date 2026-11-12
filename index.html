@@ -428,11 +428,18 @@
       return parts.length > 1 ? parts.pop().toUpperCase() : 'AUDIO';
     }
 
-    function createSession(id, name) {
-      return { id, name, tracks: [], currentIndex: -1, currentTime: 0, isShuffle: false, repeatMode: 'off', playbackRate: 1.0, searchQuery: '', selectedFolder: 'ALL' };
+    function syncControlsToSession(s) {
+      shuffleBtn.classList.toggle('toggle-active', s.isShuffle);
+      repeatBtn.classList.toggle('toggle-active', s.repeatMode !== 'off');
+      repeatIcon.innerHTML = s.repeatMode === 'one' ? SVG_REPEAT_ONE : SVG_REPEAT;
+      speedSlider.value = s.playbackRate;
+      speedValue.textContent = `${s.playbackRate.toFixed(2)}x`;
+      searchInput.value = s.searchQuery;
+      clearSearchBtn.style.display = s.searchQuery ? 'flex' : 'none';
+      activePlaylistNameEl.textContent = s.name;
+      renamePlaylistBtn.style.display = s.isLibrary ? 'none' : 'inline-block';
+      deletePlaylistBtn.style.display = (!s.isLibrary && sessions.length > 1) ? 'inline-block' : 'none';
     }
-    let sessions = [createSession('pl-1', 'Jazz'), createSession('pl-2', 'Workout')];
-    let activeSessionId = 'pl-1', lastSaveTimestamp = 0;
 
     function getActiveSession() {
       const found = sessions.find(s => s.id === activeSessionId);
@@ -575,30 +582,64 @@
     });
 
     function addMediaItemsToPlaylist(items, replace = false) {
-      const s = getActiveSession();
-      if (!items.length) { trackStatus.textContent = 'No supported audio files found'; return; }
+      const targetSession = getActiveSession();
+      const allSongsSession = sessions.find(s => s.isLibrary) || sessions.at(0);
+      if (!items.length) {
+        trackStatus.textContent = 'No supported audio files found';
+        return;
+      }
+
       if (replace) {
-        s.tracks = []; s.currentIndex = -1; s.currentTime = 0; s.selectedFolder = 'ALL';
+        targetSession.tracks = [];
+        targetSession.currentIndex = -1;
+        targetSession.currentTime = 0;
       }
-      items.sort((a, b) => a.file.name.localeCompare(b.file.name, undefined, { numeric: true }));
-      const empty = s.tracks.length === 0;
-      for (let i = 0; i < items.length; i++) {
-        const { file, folder } = items.at(i);
-        s.tracks.push({
-          file,
-          name: file.name.replace(/\.[^/.]+$/, ""),
-          ext: getFileExtension(file.name),
-          folder: folder || 'Local File'
-        });
+
+      const wasEmpty = targetSession.tracks.length === 0;
+      const CHUNK_SIZE = 150;
+      let offset = 0;
+
+      function processNextChunk() {
+        const slice = items.slice(offset, offset + CHUNK_SIZE);
+        for (let i = 0; i < slice.length; i++) {
+          const { file, folder } = slice.at(i);
+          const entry = {
+            file,
+            name: file.name.replace(/\.[^/.]+$/, ""),
+            ext: getFileExtension(file.name),
+            folder: folder || 'Music Library'
+          };
+          targetSession.tracks.push(entry);
+          if (targetSession.id !== allSongsSession.id) {
+            allSongsSession.tracks.push(entry);
+          }
+        }
+
+        offset += slice.length;
+        renderPlaylistTabs();
+
+        if (offset === slice.length && wasEmpty) {
+          loadTrack(0, true, 0);
+        } else {
+          trackStatus.textContent = offset < items.length
+            ? `Loading ${offset} of ${items.length} songs...`
+            : `${audio.paused ? 'Paused' : 'Playing'} (${targetSession.currentIndex + 1} of ${targetSession.tracks.length})`;
+        }
+
+        if (offset < items.length) {
+          setTimeout(processNextChunk, 25);
+        } else {
+          targetSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+          if (targetSession.id !== allSongsSession.id) {
+            allSongsSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+          }
+          renderPlaylistTabs();
+          renderPlaylist();
+          if (targetSession.tracks.length <= 500) persistSessionsToDB();
+        }
       }
-      renderPlaylistTabs();
-      renderFolderChips();
-      if (empty) {
-        loadTrack(0, true, 0);
-      } else {
-        trackStatus.textContent = `${audio.paused ? 'Paused' : 'Playing'} (${s.currentIndex + 1} of ${s.tracks.length})`;
-        renderPlaylist();
-      }
+
+      processNextChunk();
     }
 
     selectFolderBtn.addEventListener('click', () => {
@@ -612,25 +653,26 @@
     });
 
     folderFallbackInput.addEventListener('change', (e) => {
-      const items = Array.from(e.target.files).filter(isAudioMediaFile).map(file => {
+      const items = Array.from(e.target.files || []).filter(isAudioMediaFile).map(file => {
         const p = (file.webkitRelativePath || '').split('/');
         return { file, folder: p.length > 1 ? p.at(-2) : 'Music Folder' };
       });
       folderFallbackInput.value = '';
       addMediaItemsToPlaylist(items, true);
     });
-    
+
     fileInput.addEventListener('change', (e) => {
       const rawFiles = Array.from(e.target.files || []);
       if (!rawFiles.length) {
         trackStatus.textContent = 'No files received from picker';
         return;
       }
-      trackStatus.textContent = `Loading ${rawFiles.length} file(s)...`;
+      trackStatus.textContent = `Preparing ${rawFiles.length} file(s)...`;
       const items = rawFiles.filter(isAudioMediaFile).map(file => ({ file, folder: 'Music Library' }));
       fileInput.value = '';
       addMediaItemsToPlaylist(items, false);
     });
+
   </script>
   <script>
     let audioCtx = null, sourceNode = null, filters = [];
