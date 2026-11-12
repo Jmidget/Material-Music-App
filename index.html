@@ -321,7 +321,7 @@
           tx.oncomplete = () => {
             if (Array.isArray(reqS.result) && reqS.result.length) {
               sessions = reqS.result.map(s => ({ id: s.id, name: s.name, currentIndex: s.currentIndex ?? -1, currentTime: s.currentTime ?? 0, isShuffle: Boolean(s.isShuffle), repeatMode: s.repeatMode || 'off', playbackRate: s.playbackRate ?? 1.0, searchQuery: '', selectedFolder: 'ALL', tracks: (s.tracks || []).filter(t => t.file).map(t => ({ file: t.file, name: t.name, ext: t.ext, folder: t.folder, url: URL.createObjectURL(t.file) })) }));
-              activeSessionId = (reqA.result && sessions.some(s => s.id === reqA.result)) ? reqA.result : sessions.id;
+              activeSessionId = (reqA.result && sessions.some(s => s.id === reqA.result)) ? reqA.result : sessions[0].id;
             }
             resolve(true);
           };
