@@ -1,0 +1,15 @@
+{
+  "name": "Material Music Player",
+  "short_name": "Music Player",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FEF7FF",
+  "theme_color": "#6750A4",
+  "icons": [
+    {
+      "src": "https://flaticon.com",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
