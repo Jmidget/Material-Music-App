@@ -1,4 +1,4 @@
-const CACHE_NAME = 'material-player-v14';
+const CACHE_NAME = 'material-player-v15';
 const CORE_ASSETS = [
   './',
   './index.html',
