@@ -10,7 +10,8 @@
   <link rel="manifest" href="./manifest.json" />
   <link href="https://googleapis.com" rel="stylesheet">
   <link href="https://googleapis.com" rel="stylesheet">
-  <script src="https://cloudflare.com"></script>
+  <!-- <script src="https://cloudflare.com"></script> -->
+  <script src="https://unpkg.com"></script>
   <style>
     :root {
       --md-primary: #6750A4; --md-on-primary: #FFFFFF;
@@ -887,30 +888,69 @@
       albumHue = 256; albumSat = 34; applyCurrentTheme(); updateAmbientBackdrop(null, false); renderPlaylistTabs(); renderPlaylist(); persistSessionsToDB();
     }
 
-
     let activeBlobUrl = null;
+    let ffmpegInstance = null;
 
-    function loadTrack(index, autoPlay = true, startTime = 0) {
+    async function decodeWmaToWavUrl(file) {
+      if (typeof FFmpeg === 'undefined') {
+        throw new Error('WMA decoder unavailable offline');
+      }
+      if (!ffmpegInstance) {
+        const { createFFmpeg } = FFmpeg;
+        ffmpegInstance = createFFmpeg({ log: false });
+      }
+      if (!ffmpegInstance.isLoaded()) {
+        trackStatus.textContent = 'Initializing WMA engine (first time only)...';
+        await ffmpegInstance.load();
+      }
+      trackStatus.textContent = 'Decoding WMA audio...';
+      const arrayBuf = await file.arrayBuffer();
+      ffmpegInstance.FS('writeFile', 'input.wma', new Uint8Array(arrayBuf));
+      await ffmpegInstance.run('-i', 'input.wma', '-acodec', 'pcm_s16le', '-ar', '44100', 'output.wav');
+      const wavData = ffmpegInstance.FS('readFile', 'output.wav');
+      ffmpegInstance.FS('unlink', 'input.wma');
+      ffmpegInstance.FS('unlink', 'output.wav');
+      const wavBlob = new Blob([wavData.buffer], { type: 'audio/wav' });
+      return URL.createObjectURL(wavBlob);
+    }
+
+    async function loadTrack(index, autoPlay = true, startTime = 0) {
       const s = getActiveSession();
       if (index < 0 || index >= s.tracks.length) return;
       if (autoPlay) { initAudioContext(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
       if (activeBlobUrl) { URL.revokeObjectURL(activeBlobUrl); activeBlobUrl = null; }
 
-      s.currentIndex = index; s.currentTime = startTime;
+      s.currentIndex = index;
+      s.currentTime = startTime;
       const track = s.tracks.at(s.currentIndex);
-      activeBlobUrl = URL.createObjectURL(track.file);
+      trackTitle.textContent = track.name;
+      seekSlider.disabled = false;
+      extractMetadataAndArt(track);
+      renderPlaylistTabs();
+      renderPlaylist();
+
+      const isWma = track.ext.toLowerCase() === 'wma';
+      if (isWma) {
+        try {
+          activeBlobUrl = await decodeWmaToWavUrl(track.file);
+        } catch (err) {
+          trackStatus.textContent = 'WMA decode failed (needs internet once) - skipping...';
+          if (s.tracks.length > 1) setTimeout(() => loadTrack(getNextTrackIndex(), true, 0), 1500);
+          return;
+        }
+      } else {
+        activeBlobUrl = URL.createObjectURL(track.file);
+      }
+
       audio.src = activeBlobUrl;
       audio.preservesPitch = false;
       audio.webkitPreservesPitch = false;
       audio.playbackRate = s.playbackRate;
-      trackTitle.textContent = track.name;
-      seekSlider.disabled = false;
-
-      extractMetadataAndArt(track);
 
       const applyStart = () => {
         if (startTime > 0 && isFinite(audio.duration)) audio.currentTime = Math.min(startTime, audio.duration);
-        seekSlider.value = audio.currentTime; currentTimeEl.textContent = formatTime(audio.currentTime);
+        seekSlider.value = audio.currentTime;
+        currentTimeEl.textContent = formatTime(audio.currentTime);
         audio.removeEventListener('loadedmetadata', applyStart);
       };
       audio.addEventListener('loadedmetadata', applyStart);
@@ -928,10 +968,9 @@
         trackStatus.textContent = `Ready (${s.currentIndex + 1} of ${s.tracks.length})${startTime > 0 ? ' • Paused at ' + formatTime(startTime) : ''}`;
         updateAmbientBackdrop(currentCoverUrl, false);
       }
-      renderPlaylistTabs();
-      renderPlaylist();
       if (s.tracks.length <= 500) persistSessionsToDB();
     }
+
 
     function removeTrack(index) {
       const s = getActiveSession();
