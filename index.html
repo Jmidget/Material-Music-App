@@ -297,7 +297,7 @@
     function createSession(id, name) { return { id, name, tracks: [], currentIndex: -1, currentTime: 0, isShuffle: false, repeatMode: 'off', playbackRate: 1.0, searchQuery: '', selectedFolder: 'ALL' }; }
     let sessions = [createSession('pl-1', 'Jazz'), createSession('pl-2', 'Workout')];
     let activeSessionId = 'pl-1', lastSaveTimestamp = 0;
-    function getActiveSession() { return sessions.find(s => s.id === activeSessionId) || sessions; }
+    function getActiveSession() { return sessions.find(s => s.id === activeSessionId) || sessions[0]; }
 
     function openSettingsDB() {
       return new Promise((resolve, reject) => {
