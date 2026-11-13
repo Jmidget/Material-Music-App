@@ -975,8 +975,18 @@
       let displayAlbum = s ? s.name : 'Music Library';
 
       try {
-        const sliceSize = Math.min(track.file.size, 1024 * 1024);
-        const buf = await track.file.slice(0, sliceSize).arrayBuffer();
+        let buf;
+        if (track.file) {
+          const sliceSize = Math.min(track.file.size, 512 * 1024);
+          buf = await track.file.slice(0, sliceSize).arrayBuffer();
+        } else if (track.nativeUri && window.Capacitor) {
+          const res = await fetch(window.Capacitor.convertFileSrc(track.nativeUri), {
+            headers: { Range: 'bytes=0-524287' }
+          });
+          buf = await res.arrayBuffer();
+        } else {
+          throw new Error('No readable source');
+        }
         const bytes = new Uint8Array(buf);
 
         const tags = parseId3TextFrames(bytes);
@@ -1242,11 +1252,13 @@
           if (s.tracks.length > 1) setTimeout(() => loadTrack(getNextTrackIndex(), true, 0), 1500);
           return;
         }
+      } else if (track.nativeUri && window.Capacitor && window.Capacitor.convertFileSrc) {
+          audio.src = window.Capacitor.convertFileSrc(track.nativeUri);
       } else {
-        activeBlobUrl = URL.createObjectURL(track.file);
+          activeBlobUrl = URL.createObjectURL(track.file);
+          audio.src = activeBlobUrl;
       }
 
-      audio.src = activeBlobUrl;
       audio.preservesPitch = false;
       audio.webkitPreservesPitch = false;
       audio.playbackRate = s.playbackRate;
@@ -1601,6 +1613,106 @@
       });
     }
     syncQueueVisibility();
+  </script>
+  <script>
+    const isNativeCapacitor = Boolean(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
+    async function scanNativeStorageFolders() {
+      const { Filesystem } = window.Capacitor.Plugins;
+      if (!Filesystem) {
+        trackStatus.textContent = 'Filesystem plugin not found — falling back to picker';
+        fileInput.click();
+        return;
+      }
+
+      try {
+        const perm = await Filesystem.requestPermissions();
+        if (perm.publicStorage !== 'granted') {
+          trackStatus.textContent = 'Storage permission denied — please allow in Android Settings';
+          return;
+        }
+      } catch (e) {}
+
+      trackStatus.textContent = 'Scanning internal storage & SD card for music...';
+      const foundTracks = [];
+
+      async function walkNativeDir(dirPath, rootType) {
+        try {
+          const res = await Filesystem.readdir({ path: dirPath, directory: rootType });
+          for (const entry of res.files) {
+            const name = typeof entry === 'string' ? entry : entry.name;
+            const type = typeof entry === 'string' ? '' : entry.type;
+            const fullPath = dirPath ? `${dirPath}/${name}` : name;
+
+            if (name.startsWith('.')) continue;
+
+            if (type === 'directory') {
+              await walkNativeDir(fullPath, rootType);
+            } else {
+              const ext = name.split('.').pop().toLowerCase();
+              if (SUPPORTED_EXTS.has(ext)) {
+                const uriRes = await Filesystem.getUri({ path: fullPath, directory: rootType });
+                foundTracks.push({
+                  nativeUri: uriRes.uri,
+                  name: name.replace(/\.[^/.]+$/, ''),
+                  artist: '',
+                  album: '',
+                  ext: ext.toUpperCase(),
+                  folder: dirPath || 'Music'
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // Scan standard Music folders on Internal Storage
+      await walkNativeDir('Music', 'EXTERNAL_STORAGE');
+      await walkNativeDir('Download', 'EXTERNAL_STORAGE');
+
+      if (!foundTracks.length) {
+        trackStatus.textContent = 'No songs found in Music/Download — opening file picker...';
+        fileInput.click();
+        return;
+      }
+
+      const targetSession = getActiveSession();
+      const allSongsSession = sessions.find(s => s.isLibrary) || sessions.at(0);
+      const existingUris = new Set(targetSession.tracks.map(t => t.nativeUri || t.name));
+      const allUris = new Set(allSongsSession.tracks.map(t => t.nativeUri || t.name));
+
+      let addedCount = 0;
+      for (const item of foundTracks) {
+        if (!existingUris.has(item.nativeUri)) {
+          targetSession.tracks.push(item);
+          existingUris.add(item.nativeUri);
+          addedCount++;
+        }
+        if (targetSession.id !== allSongsSession.id && !allUris.has(item.nativeUri)) {
+          allSongsSession.tracks.push(item);
+          allUris.add(item.nativeUri);
+        }
+      }
+
+      targetSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      if (targetSession.id !== allSongsSession.id) {
+        allSongsSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      }
+
+      renderPlaylistTabs();
+      renderPlaylist();
+      trackStatus.textContent = `Loaded ${addedCount} songs (${targetSession.tracks.length} total)`;
+      if (targetSession.currentIndex === -1 && targetSession.tracks.length > 0) {
+        loadTrack(0, false, 0);
+      }
+    }
+
+    if (isNativeCapacitor) {
+      selectFolderBtn.addEventListener('click', (e) => {
+        e.stopImmediatePropagation();
+        scanNativeStorageFolders();
+      }, true);
+    }
   </script>
 </body>
 </html>
