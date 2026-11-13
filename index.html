@@ -142,6 +142,9 @@
     .playlist-item-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .playlist-item-sub { font-size: 11px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .remove-track-btn { background: none; border: none; color: var(--md-on-surface-variant); cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 50%; }
+    .item-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .move-track-btn { background: none; border: none; color: var(--md-on-surface-variant); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 50%; }
+    .move-track-btn:disabled { opacity: 0.25; cursor: default; }
   </style>
 </head>
 <body>
@@ -212,18 +215,21 @@
       <div class="section-header">
         <span class="section-title"><span id="activePlaylistName">Playlist 1</span> (<span id="trackCount">0</span>)</span>
         <div class="queue-actions">
+          <button class="reset-btn" id="toggleQueueBtn">Hide Queue</button>
           <button class="reset-btn" id="renamePlaylistBtn">Rename</button>
           <button class="reset-btn" id="deletePlaylistBtn" style="display:none;">Delete</button>
           <button class="reset-btn" id="clearQueueBtn">Clear</button>
         </div>
       </div>
-      <div class="search-bar">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--md-on-surface-variant)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-        <input type="text" class="search-input" id="searchInput" placeholder="Search songs, folders, or formats..." autocomplete="off" />
-        <button class="clear-search-btn" id="clearSearchBtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      <div id="queueBody">
+        <div class="search-bar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--md-on-surface-variant)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search songs, folders, or formats..." autocomplete="off" />
+          <button class="clear-search-btn" id="clearSearchBtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+        </div>
+        <div class="preset-chips" id="folderFilterChips" style="display:none;"></div>
+        <div class="playlist-list" id="playlistContainer"><div class="playlist-empty">This playlist is empty</div></div>
       </div>
-      <div class="preset-chips" id="folderFilterChips" style="display:none;"></div>
-      <div class="playlist-list" id="playlistContainer"><div class="playlist-empty">This playlist is empty</div></div>
     </div>
     <div class="card">
       <div class="section-header"><span class="section-title">Playback Speed</span><div><span class="badge" id="speedValue">1.00x</span><button class="reset-btn" id="resetSpeedBtn" style="margin-left:6px;">Reset</button></div></div>
@@ -1085,6 +1091,33 @@
       return (s.currentIndex + 1) % s.tracks.length;
     }
 
+    const SVG_UP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>';
+    const SVG_DOWN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>';
+
+    function moveTrack(fromIndex, direction) {
+      const s = getActiveSession();
+      const toIndex = fromIndex + direction;
+      if (toIndex < 0 || toIndex >= s.tracks.length) return;
+
+      const movedItem = s.tracks.splice(fromIndex, 1).at(0);
+      s.tracks.splice(toIndex, 0, movedItem);
+
+      // Keep currentIndex locked onto the active song
+      if (s.currentIndex === fromIndex) {
+        s.currentIndex = toIndex;
+      } else if (fromIndex < s.currentIndex && toIndex >= s.currentIndex) {
+        s.currentIndex--;
+      } else if (fromIndex > s.currentIndex && toIndex <= s.currentIndex) {
+        s.currentIndex++;
+      }
+
+      if (s.currentIndex >= 0) {
+        trackStatus.textContent = `${audio.paused ? 'Paused' : 'Playing'} (${s.currentIndex + 1} of ${s.tracks.length})`;
+      }
+      renderPlaylist();
+      if (s.tracks.length <= 500) persistSessionsToDB();
+    }
+
     function renderPlaylist() {
       const s = getActiveSession();
       playlistContainer.innerHTML = '';
@@ -1108,15 +1141,32 @@
         return;
       }
 
+      const isSearching = Boolean(s.searchQuery);
       const visibleSlice = filtered.slice(0, 150);
       const frag = document.createDocumentFragment();
+
       visibleSlice.forEach(({ track, originalIndex }) => {
         const isCurrent = originalIndex === s.currentIndex;
         const subText = [track.artist, track.ext].filter(Boolean).join(' • ');
         const item = document.createElement('div');
         item.className = `playlist-item ${isCurrent ? 'active' : ''}`;
-        item.innerHTML = `<div class="playlist-item-info"><span style="display:flex;">${isCurrent ? SVG_EQ : SVG_NOTE}</span><div class="playlist-item-text"><span class="playlist-item-title">${track.name}</span><span class="playlist-item-sub">${subText}</span></div></div><button class="remove-track-btn">${SVG_CLOSE}</button>`;
+        item.innerHTML = `
+          <div class="playlist-item-info">
+            <span style="display:flex;">${isCurrent ? SVG_EQ : SVG_NOTE}</span>
+            <div class="playlist-item-text">
+              <span class="playlist-item-title">${track.name}</span>
+              <span class="playlist-item-sub">${subText}</span>
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="move-track-btn move-up-btn" title="Move Up" ${isSearching || originalIndex === 0 ? 'disabled' : ''}>${SVG_UP}</button>
+            <button class="move-track-btn move-down-btn" title="Move Down" ${isSearching || originalIndex === s.tracks.length - 1 ? 'disabled' : ''}>${SVG_DOWN}</button>
+            <button class="remove-track-btn" title="Remove">${SVG_CLOSE}</button>
+          </div>
+        `;
         item.querySelector('.playlist-item-info').addEventListener('click', () => loadTrack(originalIndex, true, 0));
+        item.querySelector('.move-up-btn').addEventListener('click', (e) => { e.stopPropagation(); moveTrack(originalIndex, -1); });
+        item.querySelector('.move-down-btn').addEventListener('click', (e) => { e.stopPropagation(); moveTrack(originalIndex, 1); });
         item.querySelector('.remove-track-btn').addEventListener('click', (e) => { e.stopPropagation(); removeTrack(originalIndex); });
         frag.appendChild(item);
       });
@@ -1533,6 +1583,24 @@
       }
     }
     drawVisualizer();
+    
+    const toggleQueueBtn = document.getElementById('toggleQueueBtn');
+    const queueBody = document.getElementById('queueBody');
+    let queueVisible = localStorage.getItem('materialPlayerQueueVisible') !== 'false';
+
+    function syncQueueVisibility() {
+      if (queueBody) queueBody.style.display = queueVisible ? 'block' : 'none';
+      if (toggleQueueBtn) toggleQueueBtn.textContent = queueVisible ? 'Hide Queue' : 'Show Queue';
+    }
+
+    if (toggleQueueBtn) {
+      toggleQueueBtn.addEventListener('click', () => {
+        queueVisible = !queueVisible;
+        localStorage.setItem('materialPlayerQueueVisible', queueVisible);
+        syncQueueVisibility();
+      });
+    }
+    syncQueueVisibility();
   </script>
 </body>
 </html>
