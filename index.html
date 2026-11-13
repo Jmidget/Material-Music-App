@@ -513,6 +513,45 @@
       return parts.length > 1 ? parts.pop().toUpperCase() : 'AUDIO';
     }
 
+    async function readQuickId3Meta(file) {
+      const meta = { title: '', artist: '', album: '' };
+      try {
+        const buf = await file.slice(0, 32768).arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        if (bytes.length < 10 || bytes.at(0) !== 0x49 || bytes.at(1) !== 0x44 || bytes.at(2) !== 0x33) return meta;
+        const version = bytes.at(3);
+        if (version < 3 || version > 4) return meta;
+
+        const tagSize = ((bytes.at(6) & 0x7F) << 21) | ((bytes.at(7) & 0x7F) << 14) | ((bytes.at(8) & 0x7F) << 7) | (bytes.at(9) & 0x7F);
+        const limit = Math.min(bytes.length, tagSize + 10);
+        let pos = 10;
+        if ((bytes.at(5) & 0x40) !== 0) pos += 10;
+
+        while (pos + 10 < limit) {
+          const frameId = String.fromCharCode(bytes.at(pos), bytes.at(pos + 1), bytes.at(pos + 2), bytes.at(pos + 3));
+          if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
+          const frameSize = version === 4
+            ? ((bytes.at(pos + 4) & 0x7F) << 21) | ((bytes.at(pos + 5) & 0x7F) << 14) | ((bytes.at(pos + 6) & 0x7F) << 7) | (bytes.at(pos + 7) & 0x7F)
+            : (bytes.at(pos + 4) << 24) | (bytes.at(pos + 5) << 16) | (bytes.at(pos + 6) << 8) | bytes.at(pos + 7);
+          if (frameSize <= 1 || pos + 10 + frameSize > limit) break;
+
+          if (frameId === 'TIT2' || frameId === 'TPE1' || frameId === 'TALB') {
+            const enc = bytes.at(pos + 10);
+            const raw = bytes.slice(pos + 11, pos + 10 + frameSize);
+            const dec = (enc === 1 || enc === 2) ? 'utf-16' : (enc === 3 ? 'utf-8' : 'iso-8859-1');
+            try {
+              const txt = new TextDecoder(dec).decode(raw).replace(/\0/g, '').trim();
+              if (frameId === 'TIT2' && txt) meta.title = txt;
+              if (frameId === 'TPE1' && txt) meta.artist = txt;
+              if (frameId === 'TALB' && txt) meta.album = txt;
+            } catch (e) {}
+          }
+          pos += 10 + frameSize;
+        }
+      } catch (e) {}
+      return meta;
+    }
+
     function createSession(id, name, isLibrary = false) {
       return { id, name, isLibrary, tracks: [], currentIndex: -1, currentTime: 0, isShuffle: false, repeatMode: 'off', playbackRate: 1.0, searchQuery: '', selectedFolder: 'ALL' };
     }
@@ -693,20 +732,26 @@
       }
 
       const wasEmpty = targetSession.tracks.length === 0;
-      const CHUNK_SIZE = 150;
+      const CHUNK_SIZE = 100;
       let offset = 0;
 
-      function processNextChunk() {
+      async function processNextChunk() {
         const slice = uniqueItems.slice(offset, offset + CHUNK_SIZE);
-        for (let i = 0; i < slice.length; i++) {
-          const { file, folder } = slice.at(i);
-          const key = `${file.name}_${file.size}`;
-          const entry = {
+        const entries = await Promise.all(slice.map(async ({ file, folder }) => {
+          const meta = await readQuickId3Meta(file);
+          return {
             file,
-            name: file.name.replace(/\.[^/.]+$/, ""),
+            name: meta.title || file.name.replace(/\.[^/.]+$/, ""),
+            artist: meta.artist || '',
+            album: meta.album || '',
             ext: getFileExtension(file.name),
             folder: folder || 'Music Library'
           };
+        }));
+
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries.at(i);
+          const key = `${entry.file.name}_${entry.file.size}`;
           targetSession.tracks.push(entry);
           if (targetSession.id !== allSongsSession.id && !allSongsKeys.has(key)) {
             allSongsSession.tracks.push(entry);
@@ -721,12 +766,12 @@
           loadTrack(0, true, 0);
         } else {
           trackStatus.textContent = offset < uniqueItems.length
-            ? `Loading ${offset} of ${uniqueItems.length} songs...`
+            ? `Reading tags ${offset} of ${uniqueItems.length}...`
             : `${audio.paused ? 'Paused' : 'Playing'} (${targetSession.currentIndex + 1} of ${targetSession.tracks.length})`;
         }
 
         if (offset < uniqueItems.length) {
-          setTimeout(processNextChunk, 25);
+          setTimeout(processNextChunk, 20);
         } else {
           targetSession.tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
           if (targetSession.id !== allSongsSession.id) {
@@ -1025,7 +1070,12 @@
       }
       const filtered = s.tracks
         .map((track, originalIndex) => ({ track, originalIndex }))
-        .filter(({ track }) => !s.searchQuery || track.name.toLowerCase().includes(s.searchQuery) || track.ext.toLowerCase().includes(s.searchQuery));
+        .filter(({ track }) =>
+          !s.searchQuery ||
+          track.name.toLowerCase().includes(s.searchQuery) ||
+          (track.artist && track.artist.toLowerCase().includes(s.searchQuery)) ||
+          track.ext.toLowerCase().includes(s.searchQuery)
+        );
 
       trackCountEl.textContent = filtered.length === s.tracks.length ? `${s.tracks.length}` : `${filtered.length} of ${s.tracks.length}`;
       if (!filtered.length) {
@@ -1037,9 +1087,10 @@
       const frag = document.createDocumentFragment();
       visibleSlice.forEach(({ track, originalIndex }) => {
         const isCurrent = originalIndex === s.currentIndex;
+        const subText = [track.artist, track.ext].filter(Boolean).join(' • ');
         const item = document.createElement('div');
         item.className = `playlist-item ${isCurrent ? 'active' : ''}`;
-        item.innerHTML = `<div class="playlist-item-info"><span style="display:flex;">${isCurrent ? SVG_EQ : SVG_NOTE}</span><div class="playlist-item-text"><span class="playlist-item-title">${track.name}</span><span class="playlist-item-sub">${track.ext}</span></div></div><button class="remove-track-btn">${SVG_CLOSE}</button>`;
+        item.innerHTML = `<div class="playlist-item-info"><span style="display:flex;">${isCurrent ? SVG_EQ : SVG_NOTE}</span><div class="playlist-item-text"><span class="playlist-item-title">${track.name}</span><span class="playlist-item-sub">${subText}</span></div></div><button class="remove-track-btn">${SVG_CLOSE}</button>`;
         item.querySelector('.playlist-item-info').addEventListener('click', () => loadTrack(originalIndex, true, 0));
         item.querySelector('.remove-track-btn').addEventListener('click', (e) => { e.stopPropagation(); removeTrack(originalIndex); });
         frag.appendChild(item);
