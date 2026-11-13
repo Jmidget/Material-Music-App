@@ -1112,26 +1112,17 @@
     nextBtn.addEventListener('click', () => { if (getActiveSession().tracks.length) loadTrack(getNextTrackIndex(), true, 0); });
     rewindBtn.addEventListener('click', () => { if (audio.src) { audio.currentTime = Math.max(0, audio.currentTime - 10); saveCurrentSessionSnapshot(true); } });
     forwardBtn.addEventListener('click', () => { if (audio.src) { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10); saveCurrentSessionSnapshot(true); } });
-    speedSlider.step = '0.01';
 
+    speedSlider.step = '0.01';
     speedSlider.addEventListener('input', (e) => {
-      const s = getActiveSession();
-      const r = parseFloat(e.target.value);
-      s.playbackRate = r;
-      audio.preservesPitch = false;
-      audio.webkitPreservesPitch = false;
-      audio.playbackRate = r;
+      const s = getActiveSession(); const r = parseFloat(e.target.value);
+      s.playbackRate = r; audio.preservesPitch = false; audio.webkitPreservesPitch = false; audio.playbackRate = r;
       speedValue.textContent = `${r.toFixed(2)}x`;
       if (s.tracks.length <= 500) persistSessionsToDB();
     });
-
     resetSpeedBtn.addEventListener('click', () => {
-      const s = getActiveSession();
-      s.playbackRate = 1.0;
-      speedSlider.value = 1.0;
-      audio.preservesPitch = false;
-      audio.webkitPreservesPitch = false;
-      audio.playbackRate = 1.0;
+      const s = getActiveSession(); s.playbackRate = 1.0; speedSlider.value = 1.0;
+      audio.preservesPitch = false; audio.webkitPreservesPitch = false; audio.playbackRate = 1.0;
       speedValue.textContent = '1.00x';
       if (s.tracks.length <= 500) persistSessionsToDB();
     });
@@ -1148,6 +1139,18 @@
       else { playIcon.innerHTML = SVG_PLAY; trackStatus.textContent = 'Playlist finished'; updateAmbientBackdrop(currentCoverUrl, false); persistSessionsToDB(); }
     });
 
+    window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveCurrentSessionSnapshot(true); });
+    window.addEventListener('pagehide', () => saveCurrentSessionSnapshot(true));
+
+    (async function bootApp() {
+      await restoreSessionsFromDB();
+      const s = getActiveSession();
+      syncControlsToSession(s); renderPlaylistTabs(); renderFolderChips();
+      if (s.tracks.length > 0 && s.currentIndex >= 0) loadTrack(s.currentIndex, false, s.currentTime);
+      else renderPlaylist();
+    })();
+  </script>
+  <script>
     const albumArtBox = document.getElementById('albumArtBox');
     const npModal = document.getElementById('npModal');
     const npModalBg = document.getElementById('npModalBg');
@@ -1167,6 +1170,7 @@
     const npShuffleBtn = document.getElementById('npShuffleBtn');
     const npRepeatBtn = document.getElementById('npRepeatBtn');
     const npRepeatIcon = document.getElementById('npRepeatIcon');
+    const npArtBox = document.querySelector('.np-modal-art');
 
     function syncNowPlayingModal() {
       const s = getActiveSession();
@@ -1195,18 +1199,22 @@
       }
     }
 
-    albumArtBox.addEventListener('click', () => {
-      syncNowPlayingModal();
-      npModal.classList.add('open');
-    });
+    albumArtBox.addEventListener('click', () => { syncNowPlayingModal(); npModal.classList.add('open'); });
     closeNpBtn.addEventListener('click', () => npModal.classList.remove('open'));
-    
-    const npArtBox = document.querySelector('.np-modal-art');
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let lastTouchX = 0;
-    let lastTouchY = 0;
-    let isSwipingArt = false;
+    npPlayPauseBtn.addEventListener('click', () => { playPauseBtn.click(); setTimeout(syncNowPlayingModal, 50); });
+    npPrevBtn.addEventListener('click', () => { prevBtn.click(); setTimeout(syncNowPlayingModal, 100); });
+    npNextBtn.addEventListener('click', () => { nextBtn.click(); setTimeout(syncNowPlayingModal, 100); });
+    npShuffleBtn.addEventListener('click', () => { shuffleBtn.click(); syncNowPlayingModal(); });
+    npRepeatBtn.addEventListener('click', () => { repeatBtn.click(); syncNowPlayingModal(); });
+    npSeekSlider.addEventListener('input', (e) => {
+      audio.currentTime = parseFloat(e.target.value);
+      seekSlider.value = audio.currentTime;
+      npCurrentTime.textContent = formatTime(audio.currentTime);
+      saveCurrentSessionSnapshot(true);
+    });
+    audio.addEventListener('timeupdate', () => { if (npModal.classList.contains('open')) syncNowPlayingModal(); });
+
+    let touchStartX = 0, touchStartY = 0, lastTouchX = 0, lastTouchY = 0, isSwipingArt = false;
 
     function finishArtSwipe() {
       if (!isSwipingArt) return;
@@ -1219,11 +1227,8 @@
       const dy = lastTouchY - touchStartY;
 
       if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
-        if (dx < 0) {
-          nextBtn.click();
-        } else {
-          prevBtn.click();
-        }
+        if (dx < 0) nextBtn.click();
+        else prevBtn.click();
         setTimeout(syncNowPlayingModal, 120);
       } else if (dy > 75 && Math.abs(dy) > Math.abs(dx)) {
         npModal.classList.remove('open');
@@ -1255,49 +1260,6 @@
 
     npModal.addEventListener('touchend', finishArtSwipe, { passive: true });
     npModal.addEventListener('touchcancel', finishArtSwipe, { passive: true });
-  
-      const endTouch = e.changedTouches.at(0);
-      if (!endTouch) return;
-      const dx = endTouch.clientX - touchStartX;
-      const dy = endTouch.clientY - touchStartY;
-
-      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) {
-        if (dx < 0) {
-          nextBtn.click();
-        } else {
-          prevBtn.click();
-        }
-        setTimeout(syncNowPlayingModal, 120);
-      } else if (dy > 85 && Math.abs(dy) > Math.abs(dx)) {
-        npModal.classList.remove('open');
-      }
-    });   
-    
-    npPlayPauseBtn.addEventListener('click', () => { playPauseBtn.click(); setTimeout(syncNowPlayingModal, 50); });
-    npPrevBtn.addEventListener('click', () => { prevBtn.click(); setTimeout(syncNowPlayingModal, 100); });
-    npNextBtn.addEventListener('click', () => { nextBtn.click(); setTimeout(syncNowPlayingModal, 100); });
-    npShuffleBtn.addEventListener('click', () => { shuffleBtn.click(); syncNowPlayingModal(); });
-    npRepeatBtn.addEventListener('click', () => { repeatBtn.click(); syncNowPlayingModal(); });
-    npSeekSlider.addEventListener('input', (e) => {
-      audio.currentTime = parseFloat(e.target.value);
-      seekSlider.value = audio.currentTime;
-      npCurrentTime.textContent = formatTime(audio.currentTime);
-      saveCurrentSessionSnapshot(true);
-    });
-    audio.addEventListener('timeupdate', () => {
-      if (npModal.classList.contains('open')) syncNowPlayingModal();
-    });
-    
-    window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveCurrentSessionSnapshot(true); });
-    window.addEventListener('pagehide', () => saveCurrentSessionSnapshot(true));
-
-    (async function bootApp() {
-      await restoreSessionsFromDB();
-      const s = getActiveSession();
-      syncControlsToSession(s); renderPlaylistTabs(); renderFolderChips();
-      if (s.tracks.length > 0 && s.currentIndex >= 0) loadTrack(s.currentIndex, false, s.currentTime);
-      else renderPlaylist();
-    })();
   </script>
 </body>
 </html>
