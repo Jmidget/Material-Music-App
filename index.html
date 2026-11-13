@@ -64,12 +64,12 @@
     .album-art .material-icons-round { font-size: 62px; }
     .album-art { cursor: pointer; transition: transform 0.2s ease; }
     .album-art:active { transform: scale(0.96); }
-    .np-modal { position: fixed; inset: 0; z-index: 50; background-color: var(--md-surface); display: none; flex-direction: column; justify-content: space-between; padding: 20px 24px 36px; overflow-y: auto; }
+    .np-modal { position: fixed; inset: 0; z-index: 50; background-color: var(--md-surface); display: none; flex-direction: column; justify-content: space-between; padding: 20px 24px 36px; overflow-y: auto; touch-action: pan-y; }
     .np-modal.open { display: flex; }
     .np-modal-bg { position: absolute; inset: -15%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.6); opacity: 0.35; z-index: -1; pointer-events: none; }
     .np-modal-header { display: flex; justify-content: space-between; align-items: center; }
     .np-modal-art { width: min(310px, 78vw); height: min(310px, 78vw); margin: 16px auto; border-radius: 32px; background-color: var(--md-primary-container); color: var(--md-on-primary-container); display: flex; align-items: center; justify-content: center; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,0.32); touch-action: none; transition: transform 0.22s ease, opacity 0.22s ease; }
-    .np-modal-art img { width: 100%; height: 100%; object-fit: cover; display: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+    .np-modal-art img { width: 100%; height: 100%; object-fit: cover; display: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }    
     .np-modal-info { text-align: center; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
     .np-modal-title { font-size: 22px; font-weight: 700; color: var(--md-on-surface); }
     .np-modal-artist { font-size: 15px; font-weight: 500; color: var(--md-primary); }
@@ -1245,7 +1245,7 @@
       npArtBox.style.transition = 'none';
     }, { passive: true });
 
-    npModal.addEventListener('touchmove', (e) => {
+     npModal.addEventListener('touchmove', (e) => {
       if (!isSwipingArt || !e.touches.length) return;
       lastTouchX = e.touches.at(0).clientX;
       lastTouchY = e.touches.at(0).clientY;
@@ -1255,6 +1255,9 @@
         const clampedX = Math.max(-120, Math.min(120, dx));
         npArtBox.style.transform = `translateX(${clampedX}px) rotate(${clampedX * 0.04}deg)`;
         npArtBox.style.opacity = `${1 - Math.min(Math.abs(clampedX) / 260, 0.35)}`;
+        if (Math.abs(dx) > 45) {
+          npModalPlaylist.textContent = dx < 0 ? 'Release for Next Track →' : '← Release for Previous Track';
+        }
       }
     }, { passive: true });
 
