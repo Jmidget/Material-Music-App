@@ -68,7 +68,7 @@
     .np-modal.open { display: flex; }
     .np-modal-bg { position: absolute; inset: -15%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.6); opacity: 0.35; z-index: -1; pointer-events: none; }
     .np-modal-header { display: flex; justify-content: space-between; align-items: center; }
-    .np-modal-art { width: min(310px, 78vw); height: min(310px, 78vw); margin: 16px auto; border-radius: 32px; background-color: var(--md-primary-container); color: var(--md-on-primary-container); display: flex; align-items: center; justify-content: center; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,0.32); }
+    .np-modal-art { width: min(310px, 78vw); height: min(310px, 78vw); margin: 16px auto; border-radius: 32px; background-color: var(--md-primary-container); color: var(--md-on-primary-container); display: flex; align-items: center; justify-content: center; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,0.32); touch-action: none; transition: transform 0.22s ease, opacity 0.22s ease; }
     .np-modal-art img { width: 100%; height: 100%; object-fit: cover; display: none; }
     .np-modal-info { text-align: center; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
     .np-modal-title { font-size: 22px; font-weight: 700; color: var(--md-on-surface); }
@@ -1200,6 +1200,55 @@
       npModal.classList.add('open');
     });
     closeNpBtn.addEventListener('click', () => npModal.classList.remove('open'));
+    
+    const npArtBox = document.querySelector('.np-modal-art');
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isSwipingArt = false;
+
+    npArtBox.addEventListener('touchstart', (e) => {
+      if (!e.touches.length) return;
+      touchStartX = e.touches.at(0).clientX;
+      touchStartY = e.touches.at(0).clientY;
+      isSwipingArt = true;
+      npArtBox.style.transition = 'none';
+    }, { passive: true });
+
+    npArtBox.addEventListener('touchmove', (e) => {
+      if (!isSwipingArt || !e.touches.length) return;
+      const dx = e.touches.at(0).clientX - touchStartX;
+      const dy = e.touches.at(0).clientY - touchStartY;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        const clampedX = Math.max(-110, Math.min(110, dx));
+        npArtBox.style.transform = `translateX(${clampedX}px) rotate(${clampedX * 0.04}deg)`;
+        npArtBox.style.opacity = `${1 - Math.min(Math.abs(clampedX) / 260, 0.35)}`;
+      }
+    }, { passive: true });
+
+    npArtBox.addEventListener('touchend', (e) => {
+      if (!isSwipingArt) return;
+      isSwipingArt = false;
+      npArtBox.style.transition = 'transform 0.22s ease, opacity 0.22s ease';
+      npArtBox.style.transform = 'translateX(0) rotate(0deg)';
+      npArtBox.style.opacity = '1';
+
+      const endTouch = e.changedTouches.at(0);
+      if (!endTouch) return;
+      const dx = endTouch.clientX - touchStartX;
+      const dy = endTouch.clientY - touchStartY;
+
+      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) {
+        if (dx < 0) {
+          nextBtn.click();
+        } else {
+          prevBtn.click();
+        }
+        setTimeout(syncNowPlayingModal, 120);
+      } else if (dy > 85 && Math.abs(dy) > Math.abs(dx)) {
+        npModal.classList.remove('open');
+      }
+    });   
+    
     npPlayPauseBtn.addEventListener('click', () => { playPauseBtn.click(); setTimeout(syncNowPlayingModal, 50); });
     npPrevBtn.addEventListener('click', () => { prevBtn.click(); setTimeout(syncNowPlayingModal, 100); });
     npNextBtn.addEventListener('click', () => { nextBtn.click(); setTimeout(syncNowPlayingModal, 100); });
