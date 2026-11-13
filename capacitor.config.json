@@ -1,0 +1,8 @@
+{
+  "appId": "com.jmidget.materialplayer",
+  "appName": "Material Player",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
