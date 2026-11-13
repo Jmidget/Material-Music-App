@@ -1636,29 +1636,31 @@
       trackStatus.textContent = 'Scanning internal storage & SD card for music...';
       const foundTracks = [];
 
-      async function walkNativeDir(dirPath, rootType) {
+      const SD_CARD_MUSIC_URI = "file:///storage/6130-6365/Jamal's Music";
+
+      async function walkNativeDir(dirUri, folderLabel) {
         try {
-          const res = await Filesystem.readdir({ path: dirPath, directory: rootType });
+          const res = await Filesystem.readdir({ path: dirUri });
           for (const entry of res.files) {
             const name = typeof entry === 'string' ? entry : entry.name;
             const type = typeof entry === 'string' ? '' : entry.type;
-            const fullPath = dirPath ? `${dirPath}/${name}` : name;
-
             if (name.startsWith('.')) continue;
 
+            const encodedName = encodeURIComponent(name);
+            const childUri = `${dirUri}/${encodedName}`;
+
             if (type === 'directory') {
-              await walkNativeDir(fullPath, rootType);
+              await walkNativeDir(childUri, name);
             } else {
               const ext = name.split('.').pop().toLowerCase();
               if (SUPPORTED_EXTS.has(ext)) {
-                const uriRes = await Filesystem.getUri({ path: fullPath, directory: rootType });
                 foundTracks.push({
-                  nativeUri: uriRes.uri,
+                  nativeUri: childUri,
                   name: name.replace(/\.[^/.]+$/, ''),
                   artist: '',
                   album: '',
                   ext: ext.toUpperCase(),
-                  folder: dirPath || 'Music'
+                  folder: folderLabel || "Jamal's Music"
                 });
               }
             }
@@ -1666,9 +1668,9 @@
         } catch (e) {}
       }
 
-      // Scan standard Music folders on Internal Storage
-      await walkNativeDir('Music', 'EXTERNAL_STORAGE');
-      await walkNativeDir('Download', 'EXTERNAL_STORAGE');
+      // Scan your SD card folder first, plus internal Music as fallback
+      await walkNativeDir(SD_CARD_MUSIC_URI, "Jamal's Music");
+      await walkNativeDir("file:///storage/emulated/0/Music", "Internal Music");
 
       if (!foundTracks.length) {
         trackStatus.textContent = 'No songs found in Music/Download — opening file picker...';
