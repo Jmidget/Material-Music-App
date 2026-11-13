@@ -140,6 +140,7 @@
       <div class="section-header" style="margin-bottom:0;"><span class="section-title">Theme & Accent Color</span><span class="badge" id="themeModeBadge">Dynamic Cover Art</span></div>
       <div class="swatch-grid" id="swatchGrid"></div>
       <div class="blur-toggle-row"><span>Ambient Cover Blur Backdrop</span><button class="reset-btn" id="toggleBlurBtn">Enabled</button></div>
+      <div class="blur-toggle-row"><span>Live Audio Visualizer</span><button class="reset-btn" id="toggleVisBtn">Off</button></div>
     </div>
     <div class="playlist-tabs-bar" id="playlistTabsBar"></div>
     <div class="library-bar">
@@ -1404,11 +1405,32 @@
 
     const visCanvas = document.getElementById('visualizerCanvas');
     const visCtx = visCanvas ? visCanvas.getContext('2d') : null;
+    const toggleVisBtn = document.getElementById('toggleVisBtn');
     const freqData = new Uint8Array(32);
+    let visualizerEnabled = localStorage.getItem('materialPlayerVisualizer') === 'true';
+
+    function syncVisualizerToggleUI() {
+      if (toggleVisBtn) {
+        toggleVisBtn.textContent = visualizerEnabled ? 'Enabled' : 'Off';
+        toggleVisBtn.style.opacity = visualizerEnabled ? '1' : '0.65';
+      }
+      if (visCanvas) {
+        visCanvas.style.display = visualizerEnabled ? 'block' : 'none';
+      }
+    }
+
+    if (toggleVisBtn) {
+      toggleVisBtn.addEventListener('click', () => {
+        visualizerEnabled = !visualizerEnabled;
+        localStorage.setItem('materialPlayerVisualizer', visualizerEnabled);
+        syncVisualizerToggleUI();
+      });
+    }
+    syncVisualizerToggleUI();
 
     function drawVisualizer() {
       requestAnimationFrame(drawVisualizer);
-      if (!visCanvas || !visCtx) return;
+      if (!visualizerEnabled || !visCanvas || !visCtx) return;
       const w = visCanvas.width;
       const h = visCanvas.height;
       visCtx.clearRect(0, 0, w, h);
