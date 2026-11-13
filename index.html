@@ -418,7 +418,7 @@
         if (file.type.startsWith('image/') || file.type.startsWith('text/')) return false;
       }
       const parts = file.name.split('.');
-      if (parts.length === 1) return true; // Android ContentResolver sometimes omits file extension
+      if (parts.length === 1) return true;
       const ext = parts.pop().toLowerCase();
       if (BLOCKED_EXTS.has(ext)) return false;
       return SUPPORTED_EXTS.has(ext);
@@ -429,24 +429,24 @@
       return parts.length > 1 ? parts.pop().toUpperCase() : 'AUDIO';
     }
 
-    function syncControlsToSession(s) {
-      shuffleBtn.classList.toggle('toggle-active', s.isShuffle);
-      repeatBtn.classList.toggle('toggle-active', s.repeatMode !== 'off');
-      repeatIcon.innerHTML = s.repeatMode === 'one' ? SVG_REPEAT_ONE : SVG_REPEAT;
-      speedSlider.value = s.playbackRate;
-      speedValue.textContent = `${s.playbackRate.toFixed(2)}x`;
-      searchInput.value = s.searchQuery;
-      clearSearchBtn.style.display = s.searchQuery ? 'flex' : 'none';
-      activePlaylistNameEl.textContent = s.name;
-      renamePlaylistBtn.style.display = s.isLibrary ? 'none' : 'inline-block';
-      deletePlaylistBtn.style.display = (!s.isLibrary && sessions.length > 1) ? 'inline-block' : 'none';
+    function createSession(id, name, isLibrary = false) {
+      return { id, name, isLibrary, tracks: [], currentIndex: -1, currentTime: 0, isShuffle: false, repeatMode: 'off', playbackRate: 1.0, searchQuery: '', selectedFolder: 'ALL' };
     }
+
+    let sessions = [
+      createSession('pl-all', 'All Songs', true),
+      createSession('pl-1', 'Jazz'),
+      createSession('pl-2', 'Workout')
+    ];
+    let activeSessionId = 'pl-all';
+    let lastSaveTimestamp = 0;
 
     function getActiveSession() {
       const found = sessions.find(s => s.id === activeSessionId);
       return found || sessions.at(0);
     }
-        function openSettingsDB() {
+
+    function openSettingsDB() {
       return new Promise((resolve, reject) => {
         const req = indexedDB.open('MaterialPlayerDB', 2);
         req.onupgradeneeded = () => {
@@ -463,7 +463,7 @@
       try {
         const db = await openSettingsDB();
         const data = sessions.map(s => ({
-          id: s.id, name: s.name, currentIndex: s.currentIndex, currentTime: s.currentTime,
+          id: s.id, name: s.name, isLibrary: Boolean(s.isLibrary), currentIndex: s.currentIndex, currentTime: s.currentTime,
           isShuffle: s.isShuffle, repeatMode: s.repeatMode, playbackRate: s.playbackRate,
           tracks: s.tracks.map(t => ({ file: t.file, name: t.name, ext: t.ext, folder: t.folder }))
         }));
@@ -483,19 +483,11 @@
           tx.oncomplete = () => {
             if (Array.isArray(reqS.result) && reqS.result.length) {
               sessions = reqS.result.map(s => ({
-                id: s.id,
-                name: s.name,
-                isLibrary: Boolean(s.isLibrary || s.id === 'pl-all'),
-                currentIndex: s.currentIndex ?? -1,
-                currentTime: s.currentTime ?? 0,
-                isShuffle: Boolean(s.isShuffle),
-                repeatMode: s.repeatMode || 'off',
-                playbackRate: s.playbackRate ?? 1.0,
-                searchQuery: '',
-                selectedFolder: 'ALL',
-                tracks: (s.tracks || []).filter(t => t.file).map(t => ({
-                  file: t.file, name: t.name, ext: t.ext, folder: t.folder
-                }))
+                id: s.id, name: s.name, isLibrary: Boolean(s.isLibrary || s.id === 'pl-all'),
+                currentIndex: s.currentIndex ?? -1, currentTime: s.currentTime ?? 0,
+                isShuffle: Boolean(s.isShuffle), repeatMode: s.repeatMode || 'off', playbackRate: s.playbackRate ?? 1.0,
+                searchQuery: '', selectedFolder: 'ALL',
+                tracks: (s.tracks || []).filter(t => t.file).map(t => ({ file: t.file, name: t.name, ext: t.ext, folder: t.folder }))
               }));
               if (!sessions.some(s => s.isLibrary)) {
                 sessions.unshift(createSession('pl-all', 'All Songs', true));
@@ -508,7 +500,6 @@
         });
       } catch (e) { return false; }
     }
-
     function saveCurrentSessionSnapshot(force = false) {
       const s = getActiveSession();
       if (!s) return;
@@ -529,7 +520,8 @@
       searchInput.value = s.searchQuery;
       clearSearchBtn.style.display = s.searchQuery ? 'flex' : 'none';
       activePlaylistNameEl.textContent = s.name;
-      deletePlaylistBtn.style.display = sessions.length > 1 ? 'inline-block' : 'none';
+      renamePlaylistBtn.style.display = s.isLibrary ? 'none' : 'inline-block';
+      deletePlaylistBtn.style.display = (!s.isLibrary && sessions.length > 1) ? 'inline-block' : 'none';
     }
 
     function switchSession(targetId, autoResume = true) {
@@ -568,10 +560,10 @@
       addBtn.className = 'add-playlist-btn';
       addBtn.innerHTML = SVG_PLUS;
       addBtn.addEventListener('click', () => {
-        const n = prompt('Name your new playlist:', `Playlist ${sessions.length + 1}`);
+        const n = prompt('Name your new playlist:', `Playlist ${sessions.length}`);
         if (n === null) return;
         const id = `pl-${Date.now()}`;
-        sessions.push(createSession(id, n.trim() || `Playlist ${sessions.length + 1}`));
+        sessions.push(createSession(id, n.trim() || `Playlist ${sessions.length}`));
         switchSession(id, false);
       });
       playlistTabsBar.appendChild(addBtn);
@@ -587,7 +579,6 @@
       if (sessions.length <= 1) return;
       const s = getActiveSession();
       if (!confirm(`Delete "${s.name}"?`)) return;
-      s.tracks.forEach(t => URL.revokeObjectURL(t.url));
       const i = sessions.findIndex(x => x.id === s.id);
       sessions.splice(i, 1);
       activeSessionId = '';
@@ -696,7 +687,6 @@
       fileInput.value = '';
       addMediaItemsToPlaylist(items, false);
     });
-
   </script>
   <script>
     let audioCtx = null, sourceNode = null, filters = [];
